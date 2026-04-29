@@ -114,12 +114,16 @@ Walks through every architecture decision PRDForge made — topology choice, age
 
 ## Implementation status
 
-This is **V0.1**. Currently implemented:
+This is **V0.2**. Currently implemented:
 
-- ✅ `Stage 0 — @multi-agent-suitability-checker` (the moat)
-- ⏳ Stage 1, 2, 3, 4, 5 — see [STATUS.md](../../../STATUS.md) for the live build log
+- ✅ `Stage 0 — @multi-agent-suitability-checker` (the first moat)
+- ✅ `Stage 1 — @prd-parser`
+- ✅ `Stage 1 — @requirement-analyzer` (emits stable R-* IDs)
+- ✅ `Stage 1 — @clarification-auditor` (the second moat, writes CLARIFICATIONS.md)
+- ✅ `Stage 1 — @domain-researcher` (web-search enrichment)
+- ⏳ Stage 2, 3, 4, 5 — see [STATUS.md](../../../STATUS.md) for the live build log
 
-When invoked today, only `/prdforge check` produces a real verdict. The other commands surface a "not yet implemented" message and point at the build status.
+`/prdforge check` and `/prdforge clarify` are runnable end-to-end today. `/prdforge generate` runs Stages 0–1 and stops with a "downstream stages not yet implemented" notice.
 
 ---
 
