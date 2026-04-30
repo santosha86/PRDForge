@@ -1,28 +1,30 @@
 ---
 name: prdforge
 description: >
-  Router for PRDForge — the PRD-to-Skill-Pack meta-framework. Coordinates the
-  six pipeline stages and exposes user commands: check (Stage 0 only),
-  clarify (Stage 0 + 1), generate (full pipeline), trace (coverage matrix),
-  validate (run generated pack), explain (architecture decisions).
+  Router for PRDForge — the validation + governance pre-flight layer for
+  spec-driven AI development. Coordinates the V1 pipeline (Stages 0, 1, 5)
+  and exposes user commands: check (Stage 0 only), clarify (Stages 0+1),
+  trace (Stage 5 traceability matrix), bundle (inspect a generated bundle).
+  V2 will add advise (architecture brief).
 commands:
   - /prdforge check
   - /prdforge clarify
-  - /prdforge generate
   - /prdforge trace
-  - /prdforge validate
-  - /prdforge explain
-authoritative_spec: 06_PRDForge_PRD_V3.md
+  - /prdforge bundle
+  - /prdforge advise   # (V2)
+authoritative_spec: 07_PRDForge_PRD_V4.md
 ---
 
 # /prdforge — Router
 
-PRDForge reads a PRD and produces a runnable Claude Code multi-agent skill pack. It enforces two disciplines along the way:
+PRDForge reads a PRD and produces a validated artifact bundle: a suitability verdict, a clarifications log, and a requirement traceability matrix. **It does not generate code.** Output is markdown + JSON, framework-agnostic. The bundle feeds whatever downstream execution tool the user prefers.
 
-1. **Suitability Gate (Stage 0)** — refuses to build multi-agent systems for problems that should be single-agent.
-2. **Audit-grade traceability (Stage 1 + Stage 5)** — produces a `CLARIFICATIONS.md` log of every interpretation made and a coverage matrix proving every requirement landed somewhere in the generated pack.
+PRDForge enforces two disciplines:
 
-The PRD is the source of truth: [`06_PRDForge_PRD_V3.md`](../../../06_PRDForge_PRD_V3.md).
+1. **Runtime Suitability Refusal (Moat 1, Stage 0)** — refuses to proceed for problems that should be single-agent, deterministic code, or workflow automation.
+2. **Audit-grade traceability (Moat 2, Stages 1 + 5)** — produces an immutable PRD copy + appendable `CLARIFICATIONS.md` log + requirement coverage matrix. Aligns with emerging governance frameworks (EU AI Act, NIST AI RMF, ISO 42001).
+
+The PRD V4 is the source of truth: [`07_PRDForge_PRD_V4.md`](../../../07_PRDForge_PRD_V4.md). V2 and V3 are preserved as audit history.
 
 ---
 
@@ -32,7 +34,7 @@ The PRD is the source of truth: [`06_PRDForge_PRD_V3.md`](../../../06_PRDForge_P
 
 **Stage 0 only.** Cheap (~$0.05), fast (~10s).
 
-Runs `@multi-agent-suitability-checker` on the PRD and emits a `SuitabilityVerdict`. Use this before committing to a full generate run.
+Runs `@multi-agent-suitability-checker` and emits a `SuitabilityVerdict`. Use this before committing to a full clarify run.
 
 ```
 @multi-agent-suitability-checker
@@ -40,18 +42,18 @@ Runs `@multi-agent-suitability-checker` on the PRD and emits a `SuitabilityVerdi
 SuitabilityVerdict (PROCEED | REJECT)
 ```
 
-If `REJECT`, the response includes `reason_code`, `reasoning`, and `alternative_recommendation`. The pipeline stops here.
+If `REJECT`, the response includes `reason_code`, `reasoning`, and `alternative_recommendation`. The pipeline stops here and no bundle is produced.
 
 ### `/prdforge clarify --prd <path> --out <dir>`
 
-**Stage 0 + Stage 1.** Produces the validated baseline without committing to full generation.
+**Stages 0 + 1.** Produces the validated artifact bundle.
 
 ```
 @multi-agent-suitability-checker → must PROCEED
    ↓
 @prd-parser → ProductSpec
    ↓
-@requirement-analyzer → numbered requirements (R-01…R-N)
+@requirement-analyzer → numbered requirements (R-01…R-NN)
    ↓
 @clarification-auditor → CLARIFICATIONS.md (audit log)
    ↓ (user answers any clarifications in one batch)
@@ -59,32 +61,25 @@ If `REJECT`, the response includes `reason_code`, `reasoning`, and `alternative_
 @domain-researcher → enriched context
 ```
 
-Writes `<out>/CLARIFICATIONS.md` and `<out>/REQUIREMENTS.md`. The user can review before running `/prdforge generate` for the full pipeline.
+Writes `<out>/PRD.md` (immutable copy of the source), `<out>/CLARIFICATIONS.md`, and `<out>/REQUIREMENTS.md`. Together they form the validated baseline ready for downstream execution.
 
-### `/prdforge generate --prd <path> --out <dir> [--explain]`
+### `/prdforge trace --bundle <path> --delivery <path>`
 
-**Full pipeline.** Stages 0 → 5. Aborts at Stage 0 if `REJECT`.
+**Stage 5 traceability gate.** Validates that every requirement in `(PRD ∪ CLARIFICATIONS)` is covered in the downstream delivery, and emits `<bundle>/TRACEABILITY.md`.
 
-Produces:
-- The runnable skill pack at `<out>/`
-- `<out>/CLARIFICATIONS.md` — audit log
-- `<out>/TRACEABILITY.md` — requirement → coverage matrix from Stage 5
+Fail-closed on any requirement with `coverage_status: NONE`.
 
-### `/prdforge trace --pack <path>`
+### `/prdforge bundle --show <path>`
 
-Reads the traceability matrix from a generated pack's review report and prints requirement-by-requirement coverage. Used to audit a previously generated pack.
+Inspects a generated bundle and prints a summary: verdict, requirement count, clarification count, traceability status (if `TRACEABILITY.md` exists).
 
-### `/prdforge validate --pack <path> --sample <input>`
+### `/prdforge advise --bundle <path>` *(V2 — not yet implemented)*
 
-(V1.1) Runs the generated pack on a sample input end-to-end and reports whether the output is sensible. Closes the validation loop.
-
-### `/prdforge explain --pack <path>`
-
-Walks through every architecture decision PRDForge made — topology choice, agent roster rationale, schema design, rejected alternatives. Reads the decision artifacts emitted at each stage.
+Will produce an advisory architecture brief (topology recommendation, agent roster proposal, schema design) as a single markdown report. **Not** a code generator.
 
 ---
 
-## Pipeline overview
+## V1 pipeline overview
 
 ```
 [Stage 0] @multi-agent-suitability-checker          (sequential, gate)
@@ -95,19 +90,10 @@ Walks through every architecture decision PRDForge made — topology choice, age
           @clarification-auditor      ← writes CLARIFICATIONS.md
           @domain-researcher
     ▼
-[Stage 2] @architecture-planner (supervisor)         (hierarchical)
-            └─ @topology-selector ← keystone
+[Stage 5] @architecture-reviewer (lightweight)       (sequential, fail-closed)
+          → emits TRACEABILITY.md
     ▼
-[Stage 3] @agent-architect
-          @schema-designer                           (parallel fan-out)
-          @orchestration-aggregator-designer
-    ▼
-[Stage 4] @skill-file-generator (per agent in roster) (parallel)
-          @doc-test-generator
-    ▼
-[Stage 5] @architecture-reviewer + traceability gate (sequential, fail-closed)
-    │ PASS → ship pack
-    │ FAIL → route fix-hint upstream (max 2 retry cycles)
+    Validated artifact bundle ready for downstream execution
 ```
 
 ---
@@ -116,14 +102,14 @@ Walks through every architecture decision PRDForge made — topology choice, age
 
 This is **V0.2**. Currently implemented:
 
-- ✅ `Stage 0 — @multi-agent-suitability-checker` (the first moat)
+- ✅ `Stage 0 — @multi-agent-suitability-checker` (Moat 1: runtime refusal)
 - ✅ `Stage 1 — @prd-parser`
 - ✅ `Stage 1 — @requirement-analyzer` (emits stable R-* IDs)
-- ✅ `Stage 1 — @clarification-auditor` (the second moat, writes CLARIFICATIONS.md)
+- ✅ `Stage 1 — @clarification-auditor` (Moat 2 part 1: writes CLARIFICATIONS.md)
 - ✅ `Stage 1 — @domain-researcher` (web-search enrichment)
-- ⏳ Stage 2, 3, 4, 5 — see [STATUS.md](../../../STATUS.md) for the live build log
+- ⏳ `Stage 5 — @architecture-reviewer` (lightweight V1 traceability gate) — **V0.3, in progress**
 
-`/prdforge check` and `/prdforge clarify` are runnable end-to-end today. `/prdforge generate` runs Stages 0–1 and stops with a "downstream stages not yet implemented" notice.
+`/prdforge check` and `/prdforge clarify` are runnable end-to-end today. `/prdforge trace` ships in V0.3 alongside the Stage 5 reviewer. V1.0 is V0.3 → public release.
 
 ---
 
@@ -133,6 +119,8 @@ These are non-negotiable and enforced via [CLAUDE.md](../../../CLAUDE.md) and th
 
 - The source PRD is **immutable**. No agent modifies it.
 - Stage 0 can refuse. The pipeline must respect a `REJECT` verdict.
-- Stage 5 fails closed. A pack with any unmapped requirement does not ship.
+- Stage 5 fails closed. A bundle with any unmapped requirement does not pass.
 - Tight PRDs produce empty `CLARIFICATIONS.md`. No tax for clarity.
-- Agent count is capped at 12 across all 6 stages.
+- Output is markdown + JSON only. Framework-agnostic. No code generation in V1 or V2.
+- Agent count is capped at 12 across all 6 stages (V1 uses 6, V2 adds 6 more).
+- Product docs never name competitor tools. Positioning stands on its own merits.
