@@ -3,9 +3,9 @@ name: prdforge
 description: >
   Router for PRDForge — the validation + governance pre-flight layer for
   spec-driven AI development. Coordinates the V1 pipeline (Stages 0, 1, 5)
-  and exposes user commands: check (Stage 0 only), clarify (Stages 0+1),
-  trace (Stage 5 traceability matrix), bundle (inspect a generated bundle).
-  V2 will add advise (architecture brief).
+  and exposes user commands: check (Stage 0 only), clarify (Stages 0+1
+  with bundle output), trace (Stage 5 traceability matrix), bundle
+  (inspect a generated bundle). V2 will add advise (architecture brief).
 commands:
   - /prdforge check
   - /prdforge clarify
@@ -13,69 +13,160 @@ commands:
   - /prdforge bundle
   - /prdforge advise   # (V2)
 authoritative_spec: 07_PRDForge_PRD_V4.md
+authoritative_bundle_format: docs/BUNDLE_FORMAT.md
 ---
 
 # /prdforge — Router
 
-PRDForge reads a PRD and produces a validated artifact bundle: a suitability verdict, a clarifications log, and a requirement traceability matrix. **It does not generate code.** Output is markdown + JSON, framework-agnostic. The bundle feeds whatever downstream execution tool the user prefers.
+PRDForge reads a PRD and produces a validated artifact bundle: a suitability verdict, an audit log of resolved ambiguities, and a requirement traceability matrix. **It does not generate code.** Output is markdown + JSON, framework-agnostic. The bundle feeds whatever downstream execution tool the user prefers.
 
 PRDForge enforces two disciplines:
 
 1. **Runtime Suitability Refusal (Moat 1, Stage 0)** — refuses to proceed for problems that should be single-agent, deterministic code, or workflow automation.
-2. **Audit-grade traceability (Moat 2, Stages 1 + 5)** — produces an immutable PRD copy + appendable `CLARIFICATIONS.md` log + requirement coverage matrix. Aligns with emerging governance frameworks (EU AI Act, NIST AI RMF, ISO 42001).
+2. **Audit-grade traceability (Moat 2, Stages 1 + 5)** — produces an immutable PRD copy + appendable `CLARIFICATIONS.md` log + requirement coverage matrix.
 
-The PRD V4 is the source of truth: [`07_PRDForge_PRD_V4.md`](../../../07_PRDForge_PRD_V4.md). V2 and V3 are preserved as audit history.
+The PRD V4 is the source of truth: [`07_PRDForge_PRD_V4.md`](../../../07_PRDForge_PRD_V4.md). The bundle on-disk contract is in [`docs/BUNDLE_FORMAT.md`](../../../docs/BUNDLE_FORMAT.md).
 
 ---
 
-## Commands
+## How to invoke this router
+
+When a user types `/prdforge <command> <args>`, parse the command and dispatch to the orchestration block below. Every command's orchestration is explicit — read the steps and execute them in order.
 
 ### `/prdforge check --prd <path>`
 
-**Stage 0 only.** Cheap (~$0.05), fast (~10s).
-
-Runs `@multi-agent-suitability-checker` and emits a `SuitabilityVerdict`. Use this before committing to a full clarify run.
+**Stage 0 only.** No bundle produced.
 
 ```
-@multi-agent-suitability-checker
-   ↓
-SuitabilityVerdict (PROCEED | REJECT)
+1. Read <path> (the PRD file). Verify it exists and is readable.
+2. Invoke @multi-agent-suitability-checker with the PRD's raw markdown as input.
+3. Receive a SuitabilityVerdict JSON object.
+4. Validate it against docs/SCHEMAS.md §1:
+     - confidence < 0.6 ⇒ verdict must be REJECT, reason_code SCOPE_TOO_VAGUE
+     - if REJECT: alternative_recommendation must be non-null
+     - if PROCEED: expected_multi_agent_benefit must be non-null
+5. Render the verdict to the user in a human-readable format:
+     - PROCEED: green checkmark, reasoning, expected benefit
+     - REJECT: red X, reason code, reasoning, alternative recommendation
+     - SCOPE_TOO_VAGUE: also list clarifying_questions with "next steps"
+6. Stop. Do not invoke any Stage 1 agents.
 ```
-
-If `REJECT`, the response includes `reason_code`, `reasoning`, and `alternative_recommendation`. The pipeline stops here and no bundle is produced.
 
 ### `/prdforge clarify --prd <path> --out <dir>`
 
 **Stages 0 + 1.** Produces the validated artifact bundle.
 
 ```
-@multi-agent-suitability-checker → must PROCEED
-   ↓
-@prd-parser → ProductSpec
-   ↓
-@requirement-analyzer → numbered requirements (R-01…R-NN)
-   ↓
-@clarification-auditor → CLARIFICATIONS.md (audit log)
-   ↓ (user answers any clarifications in one batch)
-   ↓
-@domain-researcher → enriched context
-```
+1. Run Stage 0 internally (steps 1-4 of `check` above).
+   - If REJECT: print verdict, exit. No bundle.
+   - If PROCEED: continue.
 
-Writes `<out>/PRD.md` (immutable copy of the source), `<out>/CLARIFICATIONS.md`, and `<out>/REQUIREMENTS.md`. Together they form the validated baseline ready for downstream execution.
+2. Compute bundle slug:
+     slug = lowercased, hyphenated form of ProductSpec.document_id
+            (or PRD title if document_id absent)
+   bundle_dir = <out>/<slug>/  (or <out>/ if user explicitly passed a slug)
+
+3. Create bundle_dir if it does not exist.
+
+4. Copy the source PRD bit-for-bit:
+     cp <path> bundle_dir/PRD.md
+     # Verify with sha256sum that the copy is identical to the source.
+
+5. Invoke @prd-parser with the PRD markdown.
+     → ProductSpec JSON.
+
+6. Invoke @requirement-analyzer with ProductSpec + PRD markdown.
+     → RequirementSet JSON (R-01...R-NN).
+
+7. Render REQUIREMENTS.md using .claude/skills/templates/requirements-template.md
+   with the RequirementSet data. Write to bundle_dir/REQUIREMENTS.md.
+
+8. Invoke @clarification-auditor with ProductSpec + RequirementSet + PRD markdown.
+     → ClarificationLog JSON.
+
+9. If ClarificationLog has entries:
+     a. Surface them to the user in one batch (numbered list, with relates_to,
+        ambiguity_type, and proposed multi-choice options where applicable).
+     b. Collect the user's answers (or skip-flags) for each.
+     c. Update the ClarificationLog with user_answer / user_skipped /
+        resolution_kind for each entry.
+     d. If any entry has resolution_kind: NEW_REQUIREMENT:
+        - Re-invoke @requirement-analyzer with the resolved clarifications
+          appended to ProductSpec.raw_sections to register the new R-* IDs.
+        - Re-render REQUIREMENTS.md.
+
+10. Render CLARIFICATIONS.md using clarifications-template.md
+    with the (now resolved) ClarificationLog. Write to bundle_dir/CLARIFICATIONS.md.
+
+11. Invoke @domain-researcher with ProductSpec + RequirementSet + ClarificationLog.
+     → DomainContext JSON.
+   (DomainContext is held in memory for V1; not written to bundle. V2 will use it
+    for the architecture brief.)
+
+12. Write _metadata.json to bundle_dir with:
+     - bundle_version: 1.0
+     - prdforge_version: <current>
+     - generated_at: ISO 8601 timestamp
+     - source_prd_path: <path>
+     - source_prd_sha256: <sha>
+     - suitability_verdict: { verdict, reason_code, confidence }
+     - auditor_verdict: <ClarificationLog.auditor_verdict>
+     - requirement_count: <RequirementSet.requirements.length>
+     - clarification_count: <ClarificationLog.entries.length>
+     - skipped_clarifications: <count of entries with user_skipped: true>
+     - traceability_status: null  (filled in by `prdforge trace`)
+     - traceability_run_at: null
+
+13. Print bundle summary to user:
+     ✅ Bundle written to bundle_dir/
+        - PRD.md (immutable copy)
+        - REQUIREMENTS.md (N requirements)
+        - CLARIFICATIONS.md (M entries, K skipped)
+        - _metadata.json
+     Next: build your downstream system, then run /prdforge trace to validate coverage.
+```
 
 ### `/prdforge trace --bundle <path> --delivery <path>`
 
-**Stage 5 traceability gate.** Validates that every requirement in `(PRD ∪ CLARIFICATIONS)` is covered in the downstream delivery, and emits `<bundle>/TRACEABILITY.md`.
+**Stage 5 traceability gate.** Validates downstream coverage. Fail-closed.
 
-Fail-closed on any requirement with `coverage_status: NONE`.
+```
+1. Read bundle's REQUIREMENTS.md, CLARIFICATIONS.md, and _metadata.json.
+2. Verify <delivery> directory exists and is readable.
+3. Invoke @architecture-reviewer with bundle_path and delivery_path.
+     → ReviewReport JSON with traceability_matrix.
+4. Render TRACEABILITY.md using traceability-template.md with the matrix.
+   Write to <bundle>/TRACEABILITY.md.
+5. Update <bundle>/_metadata.json:
+     - traceability_status: "PASS" or "FAIL"
+     - traceability_run_at: ISO 8601 timestamp
+6. Print verdict to user:
+     - PASS: green check, requirement counts by status, any PARTIAL notes
+     - FAIL: red X, list of NONE requirements, fix_hints from ReviewReport
+7. Exit non-zero on FAIL (so CI integrations can detect the gate).
+```
 
 ### `/prdforge bundle --show <path>`
 
-Inspects a generated bundle and prints a summary: verdict, requirement count, clarification count, traceability status (if `TRACEABILITY.md` exists).
+Inspect an existing bundle.
 
-### `/prdforge advise --bundle <path>` *(V2 — not yet implemented)*
+```
+1. Read <path>/_metadata.json.
+2. Print:
+     - source PRD path + sha256 (truncated)
+     - suitability verdict (verdict, reason_code, confidence)
+     - auditor verdict, requirement count, clarification count
+     - skipped clarifications (if any)
+     - traceability status (if `prdforge trace` has run)
+3. List files in the bundle directory with sizes.
+4. If TRACEABILITY.md exists, print the count summary table from its frontmatter.
+```
 
-Will produce an advisory architecture brief (topology recommendation, agent roster proposal, schema design) as a single markdown report. **Not** a code generator.
+### `/prdforge advise --bundle <path>` *(V2 — placeholder)*
+
+Will produce an advisory architecture brief (topology recommendation, agent roster proposal, schema design) as a single markdown report. **Not a code generator.** When invoked today, return:
+
+> "/prdforge advise is a V2 feature. V1 closes with the validated bundle + traceability gate. Track progress in STATUS.md."
 
 ---
 
@@ -90,26 +181,36 @@ Will produce an advisory architecture brief (topology recommendation, agent rost
           @clarification-auditor      ← writes CLARIFICATIONS.md
           @domain-researcher
     ▼
+        Bundle written: PRD.md + REQUIREMENTS.md
+        + CLARIFICATIONS.md + _metadata.json
+    │
+    │ (user builds downstream system using bundle as input)
+    │
+    ▼
 [Stage 5] @architecture-reviewer (lightweight)       (sequential, fail-closed)
           → emits TRACEABILITY.md
     ▼
-    Validated artifact bundle ready for downstream execution
+        Validated, audit-ready bundle
 ```
 
 ---
 
 ## Implementation status
 
-This is **V0.2**. Currently implemented:
+This is **V0.3** — V1.0-ready as of this commit.
 
 - ✅ `Stage 0 — @multi-agent-suitability-checker` (Moat 1: runtime refusal)
 - ✅ `Stage 1 — @prd-parser`
 - ✅ `Stage 1 — @requirement-analyzer` (emits stable R-* IDs)
 - ✅ `Stage 1 — @clarification-auditor` (Moat 2 part 1: writes CLARIFICATIONS.md)
 - ✅ `Stage 1 — @domain-researcher` (web-search enrichment)
-- ⏳ `Stage 5 — @architecture-reviewer` (lightweight V1 traceability gate) — **V0.3, in progress**
+- ✅ `Stage 5 — @architecture-reviewer` (lightweight V1 traceability gate, Moat 2 part 2)
+- ✅ Bundle format spec (`docs/BUNDLE_FORMAT.md`)
+- ✅ All output templates (`clarifications-template.md`, `requirements-template.md`, `traceability-template.md`)
 
-`/prdforge check` and `/prdforge clarify` are runnable end-to-end today. `/prdforge trace` ships in V0.3 alongside the Stage 5 reviewer. V1.0 is V0.3 → public release.
+All four V1 commands (`check`, `clarify`, `trace`, `bundle`) are runnable end-to-end today.
+
+V2 work (Stages 2–4 architecture brief) is planned for Q3 2026.
 
 ---
 
