@@ -1,5 +1,7 @@
 # CLAUDE.md — PRDForge
 
+> **🛑 READ FIRST: [`SESSION_RESUME.md`](./SESSION_RESUME.md)** — picking-up-tomorrow context. It captures the current build state, what's done, what's next, hard rules, user preferences that shaped the product, and a suggested first action when resuming. Always read it before any task in this repo.
+
 This file is the orientation guide for Claude Code (and any other agent host) working inside this repository.
 
 ## What this repo is
