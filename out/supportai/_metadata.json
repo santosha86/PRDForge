@@ -1,0 +1,21 @@
+{
+  "bundle_version": "1.0",
+  "prdforge_version": "0.3",
+  "generated_at": "2026-05-01T10:18:00Z",
+  "source_prd_path": "examples/ambiguous-prd.md",
+  "source_prd_sha256": "aef80d2f6eab22754783fcdd0fba1a8c2a4566bfd75c98b447a1c89327ad557e",
+  "suitability_verdict": {
+    "verdict": "PROCEED",
+    "reason_code": "SUITABLE",
+    "confidence": 0.86
+  },
+  "auditor_verdict": "CLARIFICATIONS_RESOLVED",
+  "requirement_count": 12,
+  "clarification_count": 6,
+  "skipped_clarifications": 0,
+  "new_requirements_from_clarifications": 1,
+  "traceability_status": null,
+  "traceability_run_at": null,
+  "test_artifact": true,
+  "test_artifact_note": "Generated during V1.0 smoke test on 2026-05-01. User answers in CLARIFICATIONS.md are reasonable test responses, not real product decisions. Provided as a worked-example fixture of the bundle format."
+}
