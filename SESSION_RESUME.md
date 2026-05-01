@@ -2,7 +2,25 @@
 
 > **Purpose:** Picking-up-tomorrow context for any future Claude Code (or other agent host) session working in this repo. Read this first before any task. CLAUDE.md links here from its top section.
 >
-> **Last session:** 2026-04-30. Snapshot taken at commit `8443c79` (`V0.3 — V1.0 ready: Stage 5 traceability gate + full pipeline orchestration`).
+> **Last session:** 2026-05-01. Latest commit: `5d3f115` (`Add SESSION_RESUME.md`). Snapshot last refreshed just before a manual `/compact`.
+
+---
+
+## 🔔 Most recent in-flight context (uncommitted — survives via this file only)
+
+The chat that just got compacted included two threads after commit `5d3f115`:
+
+### Thread A — Token-control / hook design (deferred, not implemented)
+- Discussed how to keep `SESSION_RESUME.md` fresh automatically.
+- **Verified via `claude-code-guide` agent that `PreCompact` is a real Claude Code hook event** (PascalCase, fires on both auto-compact and manual `/compact`, receives matcher `"manual"` or `"auto"`). Authoritative docs: [code.claude.com/docs/en/hooks.md](https://code.claude.com/docs/en/hooks.md), [hooks-guide.md](https://code.claude.com/docs/en/hooks-guide.md).
+- **Important constraint:** hooks run shell commands in isolation — they cannot ask Claude to do things, only execute scripts whose stdout is appended to context.
+- **Agreed design (deferred):** PreCompact-only hook (no Stop hook) → small shell script `.claude/hooks/refresh-session-resume.sh` → updates a marker block (`<!-- AUTO-SNAPSHOT-START / END -->`) in `SESSION_RESUME.md` from `git log` + `git status`. Curated handoff content above the marker stays untouched. No auto-commit.
+- **Status: deferred by user** — said "we will see this later." Pick this back up only if the user asks; otherwise stay focused on V1.0 release work.
+
+### Thread B — V1.0 smoke test (about to start when compact was requested)
+- The next planned action was running `/prdforge check` against all five golden-set PRDs and comparing each verdict to the expected outcome documented in the PRD's frontmatter.
+- Caveat noted: when Claude "invokes" the Stage 0 agent in the same session, it's the executor reading the skill prompt — not a fresh isolated session. Full isolated-session re-tests are recommended before the public V1.0 push, but in-session smoke test catches the major issues.
+- **This is the suggested first action when resuming.** See bottom of this file.
 
 ---
 
@@ -10,9 +28,12 @@
 
 **V1.0 is implementation-complete.** Full V1 pipeline (Stages 0 + 1 + 5) is runnable end-to-end. Six agents shipped. Bundle format spec'd. Five golden-set PRDs cover every Stage 0 outcome.
 
-**Remaining work before public V1.0 release tag:** smoke testing, prompt tightening, launch posts, outreach. Not new agents.
+**Remaining work before public V1.0 release tag:** smoke testing (the immediate next step), prompt tightening, launch posts, outreach. Not new agents.
 
 **Next planned phase:** V2 = advisory architecture brief (6 more agents, Q3 2026).
+
+**Deferred / parked:**
+- PreCompact hook to auto-refresh this file (design agreed, not yet implemented — see Thread A above).
 
 ---
 
